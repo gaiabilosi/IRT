@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <vector>
+#include <cmath>
 
 
 template<std::size_t dimension>
@@ -47,6 +48,61 @@ public:
         for (auto& particle : particles)
         {
             // TODO implement the Boris pusher
+
+            double dt = this->dt_;
+
+            // Step 1: Half-step position update
+            particle.position[0] += 0.5 * particle.v[0] * dt;
+
+            // Step 2: Find iCell and remainder for interpolation
+            double x_norm = particle.position[0] / this->layout_->cell_size(Direction::X);
+            int iCell = static_cast<int>(x_norm) + this->layout_->dual_dom_start(Direction::X);
+            double reminder = x_norm - floor(x_norm);
+
+            // Step 3: Interpolate E and B fields at the particle position
+            double Ex = interpolate(E.x, iCell, reminder);
+            double Ey = interpolate(E.y, iCell, reminder);
+            double Ez = interpolate(E.z, iCell, reminder);
+
+            double Bx = interpolate(B.x, iCell, reminder);
+            double By = interpolate(B.y, iCell, reminder);
+            double Bz = interpolate(B.z, iCell, reminder);
+
+            // Step 4: Half acceleration due to E field, defining v_minus
+            double qmdt2 = 0.5 * dt * (particle.charge / particle.mass); 
+
+            double vx_minus = particle.v[0] + qmdt2 * Ex;
+            double vy_minus = particle.v[1] + qmdt2 * Ey;
+            double vz_minus = particle.v[2] + qmdt2 * Ez;
+
+            // Step 5: Rotation due to B field, defining t, s, v' = v_minus + v_minus x t , v_plus = v_minus + v' x s
+            double tx = qmdt2 * Bx;
+            double ty = qmdt2 * By;
+            double tz = qmdt2 * Bz;
+
+            double t2 = tx * tx + ty * ty + tz * tz;
+
+            double sx = 2.0 * tx / (1.0 + t2);
+            double sy = 2.0 * ty / (1.0 + t2);
+            double sz = 2.0 * tz / (1.0 + t2);
+
+            double vpx = vx_minus + (vy_minus * tz - vz_minus * ty);
+            double vpy = vy_minus + (vz_minus * tx - vx_minus * tz);
+            double vpz = vz_minus + (vx_minus * ty - vy_minus * tx);
+
+            double vx_plus = vx_minus + (vpy * sz - vpz * sy);
+            double vy_plus = vy_minus + (vpz * sx - vpx * sz);
+            double vz_plus = vz_minus + (vpx * sy - vpy * sx);
+
+            // Step 6: Second half acceleration due to E
+            particle.v[0] = vx_plus + qmdt2 * Ex;
+            particle.v[1] = vy_plus + qmdt2 * Ey;
+            particle.v[2] = vz_plus + qmdt2 * Ez;
+
+            // Step 7: Second half-step position update
+            particle.position[0] += 0.5 * particle.v[0] * dt; 
+            
+            
         }
     }
 
